@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Reads commit subjects, one per line, and fails if any isn't a Conventional Commits subject.
+# knope versions from these: feat bumps the minor version, fix and perf the patch, and a `!` after the type or scope
+# (or a BREAKING CHANGE footer) the major. 0.x versions bump one place lower. Other types release nothing.
+set -euo pipefail
+
+types='feat|fix|perf|refactor|test|docs|build|ci|chore|revert|style'
+pattern="^(${types})(\\([a-z0-9][a-z0-9._/,-]*\\))?!?: [^ ]"
+# git's own revert subject, which knope reads as no change.
+revert='^Revert "'
+
+bad=()
+while IFS= read -r subject || [ -n "$subject" ]; do
+  [ -n "$subject" ] || continue
+  if [[ $subject =~ $pattern || $subject =~ $revert ]]; then
+    continue
+  fi
+  bad+=("$subject")
+done
+
+if [ "${#bad[@]}" -eq 0 ]; then
+  exit 0
+fi
+
+{
+  echo "Not a Conventional Commits subject:"
+  printf '  %s\n' "${bad[@]}"
+  cat <<'EOF'
+
+Write `<type>(<optional scope>): <description>`, for example `fix(cpg): keep a loop's bounds`.
+  feat                 a new feature: the next release bumps the minor version
+  fix, perf            a fix or a speedup: the patch version
+  feat!, fix!, ...     a breaking change: the major version (the minor before 1.0)
+  refactor, test, docs, build, ci, chore, revert, style: no release
+The scope is lowercase. See https://github.com/rstyled/release#commits
+EOF
+} >&2
+exit 1

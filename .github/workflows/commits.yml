@@ -1,0 +1,23 @@
+name: Conventional commits
+
+# Fails a pull request whose title, or any of whose commits, isn't a Conventional Commits subject: knope versions
+# releases from them. Call it from a workflow on pull_request, with types [opened, edited, synchronize, reopened] so a
+# retitled pull request is checked again. See README.md.
+on:
+  workflow_call:
+
+jobs:
+  commits:
+    name: Conventional commits
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: rstyled/release/commits@v1

@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Releases the commit checked out as VERSION (from lib/version): creates the tag vVERSION at it and a GitHub release
+# whose notes list the feat, fix, perf and breaking commits since the last release, then appends NOTES, if set.
+# Does nothing when the tag already exists, so a rerun is safe. Prints released=true|false for GITHUB_OUTPUT.
+# Needs GITHUB_TOKEN with contents: write, GITHUB_REPOSITORY, and the full history (fetch-depth 0).
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+: "${VERSION:?set VERSION to the version lib/version printed}"
+: "${GITHUB_TOKEN:?}" "${GITHUB_REPOSITORY:?}"
+export GH_TOKEN=$GITHUB_TOKEN
+tag=v$VERSION
+commit=$(git rev-parse HEAD)
+
+remote_tag() {
+  gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" --jq ".[] | select(.ref == \"refs/tags/$tag\") | .ref"
+}
+
+if [ -n "$(remote_tag)" ]; then
+  echo "$tag already exists; nothing to release" >&2
+  echo released=false
+  exit 0
+fi
+
+if ! git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD >/dev/null 2>&1; then
+  # The repository's first release: there's nothing before it for knope to list.
+  gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$commit" --title "$VERSION" \
+    --notes "The first versioned release. Later releases list the changes since the one before." >&2
+else
+  "$here/knope" release >&2
+  if [ -z "$(remote_tag)" ]; then
+    echo "knope released something other than $tag: did a tag land since the version was taken?" >&2
+    exit 1
+  fi
+fi
+
+if [ -n "${NOTES:-}" ]; then
+  body=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+  gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes "$body"$'\n\n'"$NOTES" >/dev/null
+fi
+echo "released $tag at $commit" >&2
+echo released=true

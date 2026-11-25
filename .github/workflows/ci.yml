@@ -1,0 +1,95 @@
+name: CI
+
+# Tests the scripts and workflows, checks a pull request's commits with this repository's own action, and on main
+# releases this repository the way it releases the others, then moves the major tag (v1) callers pin to the release.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Lint the scripts
+        run: shellcheck lib/* hooks/commit-msg tests/run
+      - name: Lint the workflows
+        run: |
+          set -eu
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/actionlint.tgz" \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tgz" | sha256sum -c --quiet -
+          tar -xzf "$RUNNER_TEMP/actionlint.tgz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" .github/workflows/*.yml
+      - name: Test, with the pinned knope it downloads
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+          tests/run
+
+  commits:
+    name: Conventional commits
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./commits
+
+  release:
+    name: Release
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: version
+        uses: ./version
+        with:
+          initial-version: 1.0.0
+      - id: release
+        if: steps.version.outputs.release == 'true'
+        uses: ./release
+        with:
+          version: ${{ steps.version.outputs.version }}
+      - name: Move the major tag to the release
+        if: steps.release.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -eu
+          major=v${VERSION%%.*}
+          refs=repos/$GITHUB_REPOSITORY/git/refs
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$major" >/dev/null 2>&1; then
+            gh api --method PATCH "$refs/tags/$major" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api --method POST "$refs" -f ref="refs/tags/$major" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          echo "$major is now $VERSION ($GITHUB_SHA)"

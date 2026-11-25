@@ -1,0 +1,142 @@
+name: Image
+
+# Builds a repository's Docker image and, on its default branch, publishes it and releases the commit:
+#   ghcr.io/<owner>/<repo>:<commit>   every build, as before
+#   ghcr.io/<owner>/<repo>:latest     every build
+#   ghcr.io/<owner>/<repo>:X.Y.Z      a build that is a release
+# and labels it with org.opencontainers.image.version (X.Y.Z, or X.Y.Z-N-gSHA between releases), .revision and
+# .source. A commit whose Conventional Commits since the last release include a feat, fix, perf or breaking change is
+# a release: once its image is published it's tagged vX.Y.Z, with a GitHub release that lists those commits and names
+# the image. A pull request builds the image without publishing it. See README.md.
+on:
+  workflow_call:
+    inputs:
+      dockerfile:
+        description: The Dockerfile, relative to the repository's root.
+        type: string
+        default: Dockerfile
+      context:
+        description: The build context.
+        type: string
+        default: .
+      image:
+        description: The image's name; ghcr.io/<owner>/<repo> by default.
+        type: string
+        default: ''
+      runs-on:
+        description: The runner that builds the image.
+        type: string
+        default: ubuntu-24.04
+      timeout-minutes:
+        type: number
+        default: 60
+      initial-version:
+        description: The first release of a repository with no vX.Y.Z tag yet.
+        type: string
+        default: 0.1.0
+    outputs:
+      version:
+        value: ${{ jobs.version.outputs.version }}
+      released:
+        value: ${{ jobs.release.outputs.released }}
+      image:
+        description: The published image by digest, on the default branch.
+        value: ${{ jobs.image.outputs.image }}
+
+jobs:
+  version:
+    name: Version
+    # A fork's pull request can't read the private images it builds on.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+      tagged: ${{ steps.version.outputs.tagged }}
+      describe: ${{ steps.version.outputs.describe }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: version
+        uses: rstyled/release/version@v1
+        with:
+          initial-version: ${{ inputs.initial-version }}
+
+  image:
+    name: Build, and publish
+    needs: version
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.build.outputs.image }}
+    env:
+      PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Build, and from the default branch publish
+        id: build
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          IMAGE_INPUT: ${{ inputs.image }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          CONTEXT: ${{ inputs.context }}
+          VERSION: ${{ needs.version.outputs.version }}
+          TAGGED: ${{ needs.version.outputs.tagged }}
+          DESCRIBE: ${{ needs.version.outputs.describe }}
+        run: |
+          set -eu
+          image=${IMAGE_INPUT:-ghcr.io/$GITHUB_REPOSITORY}
+          # Images build on private ones (rstyle-base): pulling them takes this repository's login.
+          echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          set -- --file "$DOCKERFILE" --provenance=false --metadata-file "$RUNNER_TEMP/image.json" \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.version=$DESCRIBE" \
+            --tag "$image:$GITHUB_SHA"
+          if [ "$PUBLISH" = true ]; then
+            set -- "$@" --tag "$image:latest" --push
+            if [ "$TAGGED" = true ]; then
+              set -- "$@" --tag "$image:$VERSION"
+            fi
+          fi
+          echo "Building $image:$GITHUB_SHA, version $DESCRIBE"
+          docker buildx build "$@" "$CONTEXT"
+          if [ "$PUBLISH" = true ]; then
+            digest=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$RUNNER_TEMP/image.json")
+            echo "image=$image@$digest" >> "$GITHUB_OUTPUT"
+          fi
+          docker logout ghcr.io
+
+  release:
+    name: Release
+    needs: [version, image]
+    if: needs.version.outputs.release == 'true' && github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      released: ${{ steps.release.outputs.released }}
+    concurrency:
+      group: release-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: release
+        uses: rstyled/release/release@v1
+        with:
+          version: ${{ needs.version.outputs.version }}
+          notes: "Image: `${{ needs.image.outputs.image }}`, also tagged `:${{ needs.version.outputs.version }}` and `:${{ github.sha }}`."

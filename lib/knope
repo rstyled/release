@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Runs knope, the pinned release, with rstyled/release's config: one package versioned by Git tags (vX.Y.Z), no
+# version files and no changelog file, so a release never needs a commit. The config is written for the run and
+# removed after it. `next-version` prints the version this commit releases (or the current one, if nothing would bump
+# it); `release` tags the commit and writes its GitHub release.
+#
+# KNOPE names a knope binary to use instead of downloading one; it must be the pinned version.
+set -euo pipefail
+
+version=0.23.2
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64) target=x86_64-unknown-linux-musl sum=c64f6281e012fc8e046ebd6f30be76c583e88b9ad55b00c7b1809b030db92eee ;;
+  Linux-aarch64 | Linux-arm64) target=aarch64-unknown-linux-musl sum=65ec774bd37d7d030100c896bd7fc635b11acade0fb039ffcb57c2b56be9da11 ;;
+  *) target='' sum='' ;;
+esac
+
+knope=${KNOPE:-}
+if [ -z "$knope" ]; then
+  if [ -z "$target" ]; then
+    echo "no pinned knope build for $(uname -s) $(uname -m): install knope $version and set KNOPE" >&2
+    exit 1
+  fi
+  dir="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/knope-$version"
+  knope="$dir/knope"
+  if [ ! -x "$knope" ]; then
+    mkdir -p "$dir"
+    curl -fsSL --retry 3 -o "$dir/knope.tgz" \
+      "https://github.com/knope-dev/knope/releases/download/knope%2Fv$version/knope-$target.tgz"
+    echo "$sum  $dir/knope.tgz" | sha256sum -c --quiet -
+    tar -xzf "$dir/knope.tgz" -C "$dir" --strip-components 1 "knope-$target/knope"
+    rm "$dir/knope.tgz"
+  fi
+fi
+have=$("$knope" --version)
+if [ "$have" != "knope $version" ]; then
+  echo "$knope is $have; rstyled/release pins knope $version" >&2
+  exit 1
+fi
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+if [ -e knope.toml ]; then
+  echo "$root has its own knope.toml: rstyled/release writes knope's config itself, so remove it" >&2
+  exit 1
+fi
+
+repository=${GITHUB_REPOSITORY:-}
+if [ -z "$repository" ]; then
+  repository=$(git remote get-url origin | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')
+fi
+
+# Untracked and ignored for the run, so a build that checks for a clean worktree still sees one.
+exclude=$(git rev-parse --git-path info/exclude)
+mkdir -p "$(dirname "$exclude")"
+grep -qxF /knope.toml "$exclude" 2>/dev/null || echo /knope.toml >>"$exclude"
+trap 'rm -f "$root/knope.toml"' EXIT
+cat >knope.toml <<EOF
+[package]
+
+[[workflows]]
+name = "next-version"
+
+[[workflows.steps]]
+type = "PrepareRelease"
+allow_empty = true
+
+[[workflows.steps]]
+type = "Command"
+command = "echo \$version"
+
+[[workflows]]
+name = "release"
+
+[[workflows.steps]]
+type = "PrepareRelease"
+
+[[workflows.steps]]
+type = "Release"
+
+[github]
+owner = "${repository%%/*}"
+repo = "${repository#*/}"
+EOF
+
+"$knope" "$@"

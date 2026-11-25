@@ -1,0 +1,33 @@
+name: Version
+description: >-
+  The version of the commit checked out, from Git tags and the Conventional Commits since the last one (knope). Check
+  out with fetch-depth 0.
+inputs:
+  initial-version:
+    description: The first release of a repository with no vX.Y.Z tag yet.
+    default: 0.1.0
+outputs:
+  version:
+    description: X.Y.Z, the release this commit is or makes, or else the latest release before it.
+    value: ${{ steps.version.outputs.version }}
+  tag:
+    description: vX.Y.Z
+    value: ${{ steps.version.outputs.tag }}
+  release:
+    description: "'true' when this commit makes a new release, so publishing it should tag it."
+    value: ${{ steps.version.outputs.release }}
+  tagged:
+    description: "'true' when this commit is the release `version` names, made now or already."
+    value: ${{ steps.version.outputs.tagged }}
+  describe:
+    description: The build's version for labels and logs, `version` when tagged, else X.Y.Z-N-gSHA.
+    value: ${{ steps.version.outputs.describe }}
+runs:
+  using: composite
+  steps:
+    - id: version
+      shell: bash
+      env:
+        INITIAL_VERSION: ${{ inputs.initial-version }}
+      run: |
+        "$GITHUB_ACTION_PATH/../lib/version" | tee -a "$GITHUB_OUTPUT"

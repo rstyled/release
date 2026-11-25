@@ -1,0 +1,29 @@
+name: Release
+description: >-
+  Tags the commit checked out as vVERSION and writes its GitHub release, listing the changes since the last one. Does
+  nothing if the tag exists. Needs contents write and the full history (fetch-depth 0).
+inputs:
+  version:
+    description: X.Y.Z, the version output of rstyled/release/version.
+    required: true
+  notes:
+    description: Markdown appended to the release notes, for example the image the release published.
+    default: ''
+  token:
+    description: A token with contents write.
+    default: ${{ github.token }}
+outputs:
+  released:
+    description: "'true' when this run made the release."
+    value: ${{ steps.release.outputs.released }}
+runs:
+  using: composite
+  steps:
+    - id: release
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        NOTES: ${{ inputs.notes }}
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: |
+        "$GITHUB_ACTION_PATH/../lib/release" | tee -a "$GITHUB_OUTPUT"

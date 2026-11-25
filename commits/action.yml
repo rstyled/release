@@ -1,0 +1,28 @@
+name: Conventional commits
+description: >-
+  Fails a pull request whose title, or any of whose commits, isn't a Conventional Commits subject, since knope versions
+  releases from them. Check out with fetch-depth 0.
+inputs:
+  title:
+    description: The pull request's title, which a squash merge makes the commit's subject.
+    default: ${{ github.event.pull_request.title }}
+  base:
+    description: The commit the pull request's commits start after.
+    default: ${{ github.event.pull_request.base.sha }}
+  head:
+    description: The pull request's last commit.
+    default: ${{ github.event.pull_request.head.sha }}
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        TITLE: ${{ inputs.title }}
+        BASE: ${{ inputs.base }}
+        HEAD: ${{ inputs.head }}
+      run: |
+        set -euo pipefail
+        {
+          [ -z "$TITLE" ] || printf '%s\n' "$TITLE"
+          git log --no-merges --format=%s "$BASE..$HEAD"
+        } | "$GITHUB_ACTION_PATH/../lib/check-commits"

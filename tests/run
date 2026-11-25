@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Tests lib/check-commits, hooks/commit-msg and lib/version against throwaway Git repositories. lib/version runs knope:
+# set KNOPE to a knope binary of the pinned version to test without downloading one.
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+failures=0
+
+fail() {
+  echo "FAIL: $*" >&2
+  failures=$((failures + 1))
+}
+
+# check-commits and the hook agree on every subject.
+good=(
+  'feat: add a thing'
+  'fix(cpg): keep a loop bounds'
+  'perf(core,cli): faster'
+  'refactor!: drop the old flag'
+  'feat(runner/store)!: break it'
+  'docs(evidence): note'
+  'chore: bump'
+  'ci: pin'
+  'Revert "feat: add a thing"'
+)
+bad=(
+  'Add a thing'
+  'feat:missing space'
+  'feat: '
+  'Feat: capital type'
+  'feat(CLI): capital scope'
+  'feature: unknown type'
+  'fix (cpg): space before scope'
+  'wip'
+)
+for subject in "${good[@]}"; do
+  printf '%s\n' "$subject" | "$root/lib/check-commits" 2>/dev/null || fail "check-commits refused: $subject"
+  printf '%s\n\nbody\n' "$subject" >"$work/msg"
+  "$root/hooks/commit-msg" "$work/msg" 2>/dev/null || fail "commit-msg refused: $subject"
+done
+for subject in "${bad[@]}"; do
+  printf '%s\n' "$subject" | "$root/lib/check-commits" 2>/dev/null && fail "check-commits took: $subject"
+  printf '%s\n' "$subject" >"$work/msg"
+  "$root/hooks/commit-msg" "$work/msg" 2>/dev/null && fail "commit-msg took: $subject"
+done
+printf '# a comment\n\nMerge branch main\n' >"$work/msg"
+"$root/hooks/commit-msg" "$work/msg" || fail "commit-msg refused a merge"
+printf 'fixup! feat: x\n' >"$work/msg"
+"$root/hooks/commit-msg" "$work/msg" || fail "commit-msg refused a fixup"
+printf 'feat: ok\nAdd a thing\n' | "$root/lib/check-commits" 2>"$work/err" && fail "check-commits passed a mix"
+grep -q '  Add a thing' "$work/err" || fail "check-commits didn't name the bad subject"
+
+# lib/version, through each state of a repository.
+repo=$work/repo
+git init -q -b main "$repo"
+cd "$repo"
+git config user.email test@example.com
+git config user.name test
+git remote add origin https://github.com/rstyled/example.git
+commit() { git commit -q --allow-empty -m "$1"; }
+version() { "$root/lib/version" 2>"$work/err"; }
+expect() {
+  local got
+  got=$(version | tr '\n' ' ') || { fail "lib/version failed: $(cat "$work/err")"; return; }
+  [ "$got" = "$1 " ] || fail "expected '$1', got '$got'"
+}
+
+commit 'feat: first'
+expect 'version=0.1.0 tag=v0.1.0 release=true tagged=true describe=0.1.0'
+INITIAL_VERSION=1.0.0 "$root/lib/version" | grep -qx version=1.0.0 || fail "INITIAL_VERSION ignored"
+git tag v0.1.0
+expect 'version=0.1.0 tag=v0.1.0 release=false tagged=true describe=0.1.0'
+commit 'docs: words'
+sha=$(git rev-parse --short=12 HEAD)
+expect "version=0.1.0 tag=v0.1.0 release=false tagged=false describe=0.1.0-1-g$sha"
+commit 'fix(cli): a fix'
+expect 'version=0.1.1 tag=v0.1.1 release=true tagged=true describe=0.1.1'
+commit 'feat: a feature'
+expect 'version=0.1.1 tag=v0.1.1 release=true tagged=true describe=0.1.1'
+commit 'feat!: a break'
+expect 'version=0.2.0 tag=v0.2.0 release=true tagged=true describe=0.2.0'
+git tag v1.0.0
+commit 'feat: after one'
+expect 'version=1.1.0 tag=v1.1.0 release=true tagged=true describe=1.1.0'
+commit 'Plain subject'
+expect 'version=1.1.0 tag=v1.1.0 release=true tagged=true describe=1.1.0'
+[ -z "$(git status --porcelain)" ] || fail "lib/version left the worktree changed: $(git status --porcelain)"
+[ ! -e knope.toml ] || fail "lib/version left knope.toml"
+echo 'x' >knope.toml
+version >/dev/null && fail "lib/version ran with the repository's own knope.toml"
+rm knope.toml
+
+git clone -q --depth 1 "file://$repo" "$work/shallow"
+(cd "$work/shallow" && "$root/lib/version" >/dev/null 2>&1) && fail "lib/version ran in a shallow clone"
+
+if [ "$failures" -ne 0 ]; then
+  echo "$failures failed" >&2
+  exit 1
+fi
+echo "all passed"

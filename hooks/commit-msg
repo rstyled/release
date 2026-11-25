@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Git commit-msg hook: refuses a commit whose subject isn't a Conventional Commits subject. Install it in a checkout
+# (worktrees included) with:
+#   curl -fsSL https://raw.githubusercontent.com/rstyled/release/v1/hooks/commit-msg \
+#     -o "$(git rev-parse --git-path hooks)/commit-msg" && chmod +x "$(git rev-parse --git-path hooks)/commit-msg"
+set -euo pipefail
+
+subject=$(grep -v '^#' "$1" | sed -n '/./{p;q;}')
+case "$subject" in
+  # Merges, and fixups that an autosquash folds away before the branch merges.
+  'Merge '* | 'fixup! '* | 'squash! '* | 'amend! '*) exit 0 ;;
+esac
+
+types='feat|fix|perf|refactor|test|docs|build|ci|chore|revert|style'
+pattern="^(${types})(\\([a-z0-9][a-z0-9._/,-]*\\))?!?: [^ ]"
+if [[ $subject =~ $pattern || $subject =~ ^Revert\ \" ]]; then
+  exit 0
+fi
+cat >&2 <<EOF
+commit-msg: "$subject" isn't a Conventional Commits subject.
+Write \`<type>(<optional scope>): <description>\`: feat (minor), fix or perf (patch), a \`!\` after the type for a
+breaking change (major); refactor, test, docs, build, ci, chore, revert and style release nothing.
+See https://github.com/rstyled/release#commits
+EOF
+exit 1
