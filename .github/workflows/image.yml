@@ -33,7 +33,7 @@ on:
       initial-version:
         description: The first release of a repository with no vX.Y.Z tag yet.
         type: string
-        default: 0.1.0
+        default: 0.0.1
     outputs:
       version:
         value: ${{ jobs.version.outputs.version }}
@@ -63,7 +63,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - id: version
-        uses: rstyled/release/version@v1
+        uses: rstyled/release/version@v0.0
         with:
           initial-version: ${{ inputs.initial-version }}
 
@@ -136,7 +136,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - id: release
-        uses: rstyled/release/release@v1
+        uses: rstyled/release/release@v0.0
         with:
           version: ${{ needs.version.outputs.version }}
           notes: "Image: `${{ needs.image.outputs.image }}`, also tagged `:${{ needs.version.outputs.version }}` and `:${{ github.sha }}`."

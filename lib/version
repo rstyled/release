@@ -6,12 +6,12 @@
 #             no tag yet): publishing it should tag it
 #   tagged    true when this commit is the release `version` names, made now or already
 #   describe  the build's version: `version` when tagged, else `git describe`'s X.Y.Z-N-gSHA
-# INITIAL_VERSION (default 0.1.0) is the first release of a repository with no vX.Y.Z tag.
+# INITIAL_VERSION (default 0.0.1) is the first release of a repository with no vX.Y.Z tag.
 # It needs the full history and tags: check out with fetch-depth 0.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-initial=${INITIAL_VERSION:-0.1.0}
+initial=${INITIAL_VERSION:-0.0.1}
 match='v[0-9]*.[0-9]*.[0-9]*'
 semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 

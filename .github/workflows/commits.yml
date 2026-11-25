@@ -20,4 +20,4 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: rstyled/release/commits@v1
+      - uses: rstyled/release/commits@v0.0

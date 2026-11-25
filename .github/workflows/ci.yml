@@ -1,7 +1,7 @@
 name: CI
 
 # Tests the scripts and workflows, checks a pull request's commits with this repository's own action, and on main
-# releases this repository the way it releases the others, then moves the major tag (v1) callers pin to the release.
+# releases this repository the way it releases the others, then moves the line tag callers pin (v0.0) to the release.
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
@@ -72,24 +72,31 @@ jobs:
       - id: version
         uses: ./version
         with:
-          initial-version: 1.0.0
+          initial-version: 0.0.1
       - id: release
         if: steps.version.outputs.release == 'true'
         uses: ./release
         with:
           version: ${{ steps.version.outputs.version }}
-      - name: Move the major tag to the release
+      - name: Move the line tag to the release
         if: steps.release.outputs.released == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -eu
-          major=v${VERSION%%.*}
-          refs=repos/$GITHUB_REPOSITORY/git/refs
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$major" >/dev/null 2>&1; then
-            gh api --method PATCH "$refs/tags/$major" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          # A breaking change bumps the major version from 1.0, and the minor before it: the line is what it keeps.
+          major=${VERSION%%.*}
+          if [ "$major" = 0 ]; then
+            minor=${VERSION#0.}
+            line=v0.${minor%%.*}
           else
-            gh api --method POST "$refs" -f ref="refs/tags/$major" -f sha="$GITHUB_SHA" >/dev/null
+            line=v$major
           fi
-          echo "$major is now $VERSION ($GITHUB_SHA)"
+          refs=repos/$GITHUB_REPOSITORY/git/refs
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$line" >/dev/null 2>&1; then
+            gh api --method PATCH "$refs/tags/$line" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api --method POST "$refs" -f ref="refs/tags/$line" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          echo "$line is now $VERSION ($GITHUB_SHA)"

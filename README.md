@@ -28,7 +28,7 @@ On a pull request, the image is built but not published, and the title and every
 | `fix:`, `perf:` | patch | patch |
 | `refactor:`, `test:`, `docs:`, `build:`, `ci:`, `chore:`, `revert:`, `style:` | no release | no release |
 
-A repository with no `vX.Y.Z` tag makes its first release, `0.1.0` unless `initial-version` says otherwise, on its
+A repository with no `vX.Y.Z` tag makes its first release, `0.0.1` unless `initial-version` says otherwise, on its
 next push. To leave 0.x, release `1.0.0` by hand once: `gh release create v1.0.0 --target <commit>`.
 
 ## Adopting it
@@ -53,7 +53,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   publish:
-    uses: rstyled/release/.github/workflows/image.yml@v1
+    uses: rstyled/release/.github/workflows/image.yml@v0.0
     with:
       dockerfile: publish/Dockerfile
       runs-on: warp-ubuntu-latest-x64-4x
@@ -72,7 +72,7 @@ concurrency:
   group: release-${{ github.ref }}
 jobs:
   release:
-    uses: rstyled/release/.github/workflows/release.yml@v1
+    uses: rstyled/release/.github/workflows/release.yml@v0.0
 ```
 
 Every repository (`.github/workflows/commits.yml`):
@@ -86,11 +86,11 @@ permissions:
   contents: read
 jobs:
   commits:
-    uses: rstyled/release/.github/workflows/commits.yml@v1
+    uses: rstyled/release/.github/workflows/commits.yml@v0.0
 ```
 
 A repository with its own build and deploy (rstyle-mcp-server) uses the actions inside its workflow instead:
-`rstyled/release/version@v1` early, so the build can carry the version, and `rstyled/release/release@v1` last, once
+`rstyled/release/version@v0.0` early, so the build can carry the version, and `rstyled/release/release@v0.0` last, once
 the deploy succeeds. Both need a checkout with `fetch-depth: 0`.
 
 | Action | Inputs | Outputs |
@@ -112,15 +112,16 @@ The private repositories are on GitHub's free plan, which has no branch protecti
 merge; it's on whoever merges to see it. To be stopped at commit time, install the hook in each checkout:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/rstyled/release/v1/hooks/commit-msg \
+curl -fsSL https://raw.githubusercontent.com/rstyled/release/v0.0/hooks/commit-msg \
   -o "$(git rev-parse --git-path hooks)/commit-msg" && chmod +x "$(git rev-parse --git-path hooks)/commit-msg"
 ```
 
 ## Versioning this repository
 
-It releases itself the same way (from `1.0.0`), and moves the major tag `v1` to each 1.x release, so callers pinned to
-`@v1` take fixes and keep their interface. A breaking change to an input, output or behavior is a `feat!:` and
-becomes `v2`. `tests/run` covers the scripts; set `KNOPE` to a knope 0.23.2 binary to run it offline.
+It releases itself the same way, from `0.0.1`, and moves a line tag to each release: before 1.0, `v0.MINOR` (`v0.0`
+for 0.0.x), since a breaking change there bumps the minor version; from 1.0, `vMAJOR`. Callers pin the line,
+`@v0.0` today, so they take fixes and features and keep their interface. A breaking change to an input, output or
+behavior is a `feat!:` and starts the next line (`v0.1`), which callers move to by changing their pin. `tests/run` covers the scripts; set `KNOPE` to a knope 0.23.2 binary to run it offline.
 
 The repository is public because a public repository (rstyle) can't call a workflow in a private one. It holds no
 secrets: everything runs with the calling repository's `GITHUB_TOKEN`.

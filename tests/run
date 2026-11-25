@@ -68,19 +68,21 @@ expect() {
 }
 
 commit 'feat: first'
-expect 'version=0.1.0 tag=v0.1.0 release=true tagged=true describe=0.1.0'
+expect 'version=0.0.1 tag=v0.0.1 release=true tagged=true describe=0.0.1'
 INITIAL_VERSION=1.0.0 "$root/lib/version" | grep -qx version=1.0.0 || fail "INITIAL_VERSION ignored"
-git tag v0.1.0
-expect 'version=0.1.0 tag=v0.1.0 release=false tagged=true describe=0.1.0'
+git tag v0.0.1
+# The line tag this repository moves to each release isn't a version.
+git tag v0.0
+expect 'version=0.0.1 tag=v0.0.1 release=false tagged=true describe=0.0.1'
 commit 'docs: words'
 sha=$(git rev-parse --short=12 HEAD)
-expect "version=0.1.0 tag=v0.1.0 release=false tagged=false describe=0.1.0-1-g$sha"
+expect "version=0.0.1 tag=v0.0.1 release=false tagged=false describe=0.0.1-1-g$sha"
 commit 'fix(cli): a fix'
-expect 'version=0.1.1 tag=v0.1.1 release=true tagged=true describe=0.1.1'
+expect 'version=0.0.2 tag=v0.0.2 release=true tagged=true describe=0.0.2'
 commit 'feat: a feature'
-expect 'version=0.1.1 tag=v0.1.1 release=true tagged=true describe=0.1.1'
+expect 'version=0.0.2 tag=v0.0.2 release=true tagged=true describe=0.0.2'
 commit 'feat!: a break'
-expect 'version=0.2.0 tag=v0.2.0 release=true tagged=true describe=0.2.0'
+expect 'version=0.1.0 tag=v0.1.0 release=true tagged=true describe=0.1.0'
 git tag v1.0.0
 commit 'feat: after one'
 expect 'version=1.1.0 tag=v1.1.0 release=true tagged=true describe=1.1.0'

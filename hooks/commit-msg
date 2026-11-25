@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Git commit-msg hook: refuses a commit whose subject isn't a Conventional Commits subject. Install it in a checkout
 # (worktrees included) with:
-#   curl -fsSL https://raw.githubusercontent.com/rstyled/release/v1/hooks/commit-msg \
+#   curl -fsSL https://raw.githubusercontent.com/rstyled/release/v0.0/hooks/commit-msg \
 #     -o "$(git rev-parse --git-path hooks)/commit-msg" && chmod +x "$(git rev-parse --git-path hooks)/commit-msg"
 set -euo pipefail
 

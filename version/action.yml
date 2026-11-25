@@ -5,7 +5,7 @@ description: >-
 inputs:
   initial-version:
     description: The first release of a repository with no vX.Y.Z tag yet.
-    default: 0.1.0
+    default: 0.0.1
 outputs:
   version:
     description: X.Y.Z, the release this commit is or makes, or else the latest release before it.
