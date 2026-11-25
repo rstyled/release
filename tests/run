@@ -97,6 +97,55 @@ rm knope.toml
 git clone -q --depth 1 "file://$repo" "$work/shallow"
 (cd "$work/shallow" && "$root/lib/version" >/dev/null 2>&1) && fail "lib/version ran in a shallow clone"
 
+# lib/release against a stand-in gh that keeps tags and release bodies in files, and fails once where told to.
+stub=$work/stub
+mkdir -p "$stub/bin" "$stub/state"
+cat >"$stub/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+state=$STUB_STATE
+once() { [ -e "$state/fail-$1" ] && rm "$state/fail-$1"; }
+case "$1 $2" in
+  "api repos/"*)
+    tag=${2##*/}
+    [ ! -e "$state/tag-$tag" ] || cat "$state/tag-$tag" ;;
+  "release create")
+    tag=$3; shift 3
+    while [ $# -gt 0 ]; do
+      case "$1" in --target) echo "$2" >"$state/tag-$tag"; shift ;; --notes) printf '%s' "$2" >"$state/body-$tag"; shift ;; esac
+      shift
+    done
+    if once create; then echo "HTTP 502" >&2; exit 1; fi ;;
+  "release view") cat "$state/body-$3" ;;
+  "release edit")
+    if once edit; then echo "HTTP 500" >&2; exit 1; fi
+    tag=$3; shift 3
+    while [ $# -gt 0 ]; do [ "$1" != --notes ] || printf '%s' "$2" >"$state/body-$tag"; shift; done ;;
+  *) echo "stub gh: unexpected $*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$stub/bin/gh"
+first=$work/first
+git init -q -b main "$first"
+(
+  cd "$first"
+  git config user.email test@example.com
+  git config user.name test
+  git commit -q --allow-empty -m 'feat: first'
+)
+release() {
+  (cd "$first" && PATH="$stub/bin:$PATH" STUB_STATE="$stub/state" GITHUB_TOKEN=t GITHUB_REPOSITORY=rstyled/example \
+    VERSION=0.0.1 NOTES='Image: x' RELEASE_RETRY_DELAY=0 "$root/lib/release" 2>"$work/err")
+}
+touch "$stub/state/fail-create" "$stub/state/fail-edit"
+[ "$(release)" = released=true ] || fail "lib/release didn't get past a failed create and edit: $(cat "$work/err")"
+[ "$(cat "$stub/state/tag-v0.0.1")" = "$(git -C "$first" rev-parse HEAD)" ] || fail "lib/release tagged the wrong commit"
+grep -c 'Image: x' "$stub/state/body-v0.0.1" | grep -qx 1 || fail "lib/release didn't append the notes once"
+[ "$(release)" = released=true ] || fail "a rerun of a finished release isn't released"
+grep -c 'Image: x' "$stub/state/body-v0.0.1" | grep -qx 1 || fail "a rerun appended the notes again"
+echo 0000000000000000000000000000000000000000 >"$stub/state/tag-v0.0.1"
+[ "$(release)" = released=false ] || fail "lib/release claimed a tag at another commit"
+
 if [ "$failures" -ne 0 ]; then
   echo "$failures failed" >&2
   exit 1

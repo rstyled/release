@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Releases the commit checked out as VERSION (from lib/version): creates the tag vVERSION at it and a GitHub release
 # whose notes list the feat, fix, perf and breaking commits since the last release, then appends NOTES, if set.
-# Does nothing when the tag already exists, so a rerun is safe. Prints released=true|false for GITHUB_OUTPUT.
-# Needs GITHUB_TOKEN with contents: write, GITHUB_REPOSITORY, and the full history (fetch-depth 0).
+# Prints released=true for GITHUB_OUTPUT once the commit is released, by this run or an earlier one, and
+# released=false when nothing was released.
+#
+# A rerun picks up where a failed run stopped: a release that exists at this commit gets the NOTES it lacks, and
+# GitHub's API calls are retried, since a 5xx can come after GitHub did what was asked. A tag at another commit is
+# an error. Needs GITHUB_TOKEN with contents: write, GITHUB_REPOSITORY, and the full history (fetch-depth 0).
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -11,32 +15,65 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 export GH_TOKEN=$GITHUB_TOKEN
 tag=v$VERSION
 commit=$(git rev-parse HEAD)
+attempts=${RELEASE_ATTEMPTS:-5}
+delay=${RELEASE_RETRY_DELAY:-15}
 
-remote_tag() {
-  gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" --jq ".[] | select(.ref == \"refs/tags/$tag\") | .ref"
+# Runs a command until it succeeds, waiting longer after each failure.
+retry() {
+  local attempt=1
+  until "$@"; do
+    if [ "$attempt" -ge "$attempts" ]; then
+      return 1
+    fi
+    echo "failed (attempt $attempt of $attempts); retrying in $((attempt * delay)) s" >&2
+    sleep $((attempt * delay))
+    attempt=$((attempt + 1))
+  done
 }
 
-if [ -n "$(remote_tag)" ]; then
-  echo "$tag already exists; nothing to release" >&2
+# The commit the tag names on GitHub, or nothing if there is no such tag.
+tagged_commit() {
+  gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" \
+    --jq ".[] | select(.ref == \"refs/tags/$tag\") | .object.sha"
+}
+
+# Makes the release once. When creating it fails, GitHub may still have made it: the caller's next attempt sees the
+# tag and stops.
+create() {
+  local at
+  at=$(tagged_commit) || return 1
+  [ -z "$at" ] || return 0
+  if ! git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD >/dev/null 2>&1; then
+    # The repository's first release: there's nothing before it for knope to list.
+    gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$commit" --title "$VERSION" \
+      --notes "The first versioned release. Later releases list the changes since the one before." >&2
+  else
+    "$here/knope" release >&2
+  fi
+}
+
+append_notes() {
+  local body
+  body=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json body --jq .body) || return 1
+  case "$body" in
+    *"$NOTES"*) return 0 ;;
+  esac
+  gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes "$body"$'\n\n'"$NOTES" >/dev/null
+}
+
+retry create
+at=$(retry tagged_commit)
+if [ -z "$at" ]; then
+  echo "knope released something other than $tag: did a tag land since the version was taken?" >&2
+  exit 1
+fi
+if [ "$at" != "$commit" ]; then
+  echo "$tag already names $at, not this commit ($commit): nothing to release" >&2
   echo released=false
   exit 0
 fi
-
-if ! git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD >/dev/null 2>&1; then
-  # The repository's first release: there's nothing before it for knope to list.
-  gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$commit" --title "$VERSION" \
-    --notes "The first versioned release. Later releases list the changes since the one before." >&2
-else
-  "$here/knope" release >&2
-  if [ -z "$(remote_tag)" ]; then
-    echo "knope released something other than $tag: did a tag land since the version was taken?" >&2
-    exit 1
-  fi
-fi
-
 if [ -n "${NOTES:-}" ]; then
-  body=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
-  gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes "$body"$'\n\n'"$NOTES" >/dev/null
+  retry append_notes
 fi
-echo "released $tag at $commit" >&2
+echo "$tag is released at $commit" >&2
 echo released=true

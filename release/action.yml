@@ -1,7 +1,8 @@
 name: Release
 description: >-
-  Tags the commit checked out as vVERSION and writes its GitHub release, listing the changes since the last one. Does
-  nothing if the tag exists. Needs contents write and the full history (fetch-depth 0).
+  Tags the commit checked out as vVERSION and writes its GitHub release, listing the changes since the last one. A
+  rerun completes what a failed run left, and retries GitHub's errors. Needs contents write and the full history
+  (fetch-depth 0).
 inputs:
   version:
     description: X.Y.Z, the version output of rstyled/release/version.
@@ -14,7 +15,7 @@ inputs:
     default: ${{ github.token }}
 outputs:
   released:
-    description: "'true' when this run made the release."
+    description: "'true' once the commit is released, by this run or by an earlier one this rerun completes."
     value: ${{ steps.release.outputs.released }}
 runs:
   using: composite
